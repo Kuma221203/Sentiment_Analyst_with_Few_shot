@@ -1,5 +1,6 @@
 import torch
 from torch import nn, optim
+from torch.optim.lr_scheduler import StepLR
 from typing import List
 from tqdm import tqdm
 import numpy as np
@@ -31,7 +32,8 @@ class ProtoNet(nn.Module):
         super(ProtoNet, self).__init__()
         self.backbone = Learner_protoNet()
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(self.backbone.parameters(), lr=args['lr_meta'])
+        self.meta_optim = optim.Adam(self.backbone.parameters(), lr=args['lr_meta'])
+        self.meta_scheduler = None
 
     def forward(
         self,
@@ -63,14 +65,14 @@ class ProtoNet(nn.Module):
         query_labels: torch.Tensor,
     ) -> float:
 
-        self.optimizer.zero_grad()
+        self.meta_optim.zero_grad()
         classification_scores = self.forward(
             support_features, support_labels, query_features
         )
 
         loss = self.criterion(classification_scores, query_labels)
         loss.backward()
-        self.optimizer.step()
+        self.meta_optim.step()
 
         return loss.item()
     
@@ -83,6 +85,8 @@ class ProtoNet(nn.Module):
         all_loss = []
         log_update_frequency = 10
 
+        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
+
         with tqdm(enumerate(train_loader), total=len(train_loader)) as tqdm_train:
             for episode_index, (
                 support_images,
@@ -94,7 +98,8 @@ class ProtoNet(nn.Module):
                 loss_value = self.fit(support_images, support_labels, query_images, query_labels)
                 all_loss.append(loss_value)
                 if episode_index % log_update_frequency == 0:
-                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency))
+                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
+                                           lr=self.meta_scheduler.get_last_lr())
     
     def test(self, test_loader):
         def evaluate_on_one_task(

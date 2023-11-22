@@ -66,7 +66,6 @@ def extract_features(data):
     steps = labels.shape[0] // 1000
 
     for i in range(steps):
-        print(i)
         _padded = padded[i * 1000:(i + 1)*1000, :]
         _attention_mask = attention_mask[i * 1000:(i + 1)*1000, :]
         with torch.no_grad():
@@ -87,11 +86,11 @@ def extract_features(data):
 
 # Extract train features
 X_train, y_train = extract_features(data_train)
-np.save('data/train/X_train.npy')
-np.save('data/train/y_train.npy')
+np.save('data/train/X_train.npy', X_train)
+np.save('data/train/y_train.npy', y_train)
 
 # Extract test featrure
 X_test, y_test = extract_features(data_test)
-np.save('data/test/X_test.npy')
-np.save('data/test/y_test.npy')
+np.save('data/test/X_test.npy', X_test)
+np.save('data/test/y_test.npy', y_test)
 

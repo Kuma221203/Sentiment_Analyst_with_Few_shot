@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
+from torch.optim.lr_scheduler import StepLR
 from copy import deepcopy
 from typing import List
 from tqdm import tqdm
@@ -14,10 +15,15 @@ class Learner_protoMAML(nn.Module):
 
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(768, 512),
+            nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 512),
+            nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 32),
         )
 
     def forward(self, x):
@@ -35,7 +41,7 @@ class ProtoMAML(nn.Module):
         self.lr_inner = args['lr_inner']
         self.num_inner_steps = args['num_inner_steps']
         self.meta_optim = optim.Adam(self.backbone.parameters(), lr=self.lr_meta)
-        # self.meta_scheduler = MultiStepLR(self.meta_optim, milestones=[200, 300], gamma=0.1)
+        self.meta_scheduler = None
 
     def calculate_prototypes(self, support_features, support_labels):
         n_way = len(torch.unique(support_labels))
@@ -124,6 +130,8 @@ class ProtoMAML(nn.Module):
         all_loss = []
         all_acc = []
 
+        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
+
         with tqdm(enumerate(range(num_task)), total=num_task) as tqdm_train:
             for episode_index, i in tqdm_train:
                 loss, acc = self.outer_loop(train_loader, mode="train")
@@ -131,7 +139,8 @@ class ProtoMAML(nn.Module):
                 all_acc.append(acc)
                 if episode_index % log_update_frequency == 0:
                     tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
-                                            acc=sliding_average(all_acc, log_update_frequency))
+                                            acc=sliding_average(all_acc, log_update_frequency),
+                                            lr=self.meta_scheduler.get_last_lr())
 
     def test(self, test_loader):
         _, acc = self.outer_loop(test_loader, mode="test")

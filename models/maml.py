@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
+from torch.optim.lr_scheduler import StepLR
 from copy import deepcopy
 from typing import List
 from tqdm import tqdm
@@ -93,7 +94,8 @@ class MAML(nn.Module):
                        ('linear', [2, 128])]
         self.backbone = Learner_MAML(self.config)
         self.meta_optim = optim.Adam(self.backbone.parameters(), lr=self.lr_meta)
-
+        self.meta_scheduler = None
+        
     def forward(
         self,
         data_loader,
@@ -152,6 +154,8 @@ class MAML(nn.Module):
         all_loss = []
         all_acc = []
 
+        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
+
         with tqdm(enumerate(range(num_task)), total=num_task) as tqdm_train:
             for episode_index, i in tqdm_train:
                 acc, loss = self.forward(train_loader)
@@ -159,7 +163,8 @@ class MAML(nn.Module):
                 all_acc.append(acc)
                 if episode_index % log_update_frequency == 0:
                     tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
-                                        acc=sliding_average(all_acc, log_update_frequency))
+                                        acc=sliding_average(all_acc, log_update_frequency), 
+                                        lr=self.meta_scheduler.get_last_lr())
     def test(
         self,
         data_loader,
