@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
+import random
 
 class Learner_MAML(nn.Module):
     def __init__(self, config):
@@ -140,6 +141,7 @@ class MAML(nn.Module):
         self.meta_optim.zero_grad()
         loss_q.backward()
         self.meta_optim.step()
+        self.meta_scheduler.step()
 
         accs = corrects_sum / (query_labels.size()[0] * task_num)
         return accs, loss_q.detach().numpy()
@@ -164,7 +166,7 @@ class MAML(nn.Module):
                 if episode_index % log_update_frequency == 0:
                     tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
                                         acc=sliding_average(all_acc, log_update_frequency), 
-                                        lr=self.meta_scheduler.get_last_lr())
+                                        lr=self.meta_scheduler.get_last_lr()[0])
     def test(
         self,
         data_loader,
@@ -175,6 +177,8 @@ class MAML(nn.Module):
         corrects_sum = 0
 
         _backbone = deepcopy(self.backbone)
+
+        random.seed(0)
 
         for iter, (
                 support_features,
@@ -201,6 +205,8 @@ class MAML(nn.Module):
                 pred_q = softmax(z_query).argmax(dim=1)
                 correct = torch.eq(pred_q, query_labels).sum().item()
                 corrects_sum += correct
+            
+            random.seed(iter + 1)
 
         del _backbone
 

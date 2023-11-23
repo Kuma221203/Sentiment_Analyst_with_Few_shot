@@ -4,6 +4,7 @@ from torch.optim.lr_scheduler import StepLR
 from typing import List
 from tqdm import tqdm
 import numpy as np
+import random
 
 class Learner_protoNet(nn.Module):
     def __init__(self):
@@ -73,6 +74,7 @@ class ProtoNet(nn.Module):
         loss = self.criterion(classification_scores, query_labels)
         loss.backward()
         self.meta_optim.step()
+        self.meta_scheduler.step()
 
         return loss.item()
     
@@ -99,7 +101,7 @@ class ProtoNet(nn.Module):
                 all_loss.append(loss_value)
                 if episode_index % log_update_frequency == 0:
                     tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
-                                           lr=self.meta_scheduler.get_last_lr())
+                                           lr=self.meta_scheduler.get_last_lr()[0])
     
     def test(self, test_loader):
         def evaluate_on_one_task(
@@ -124,6 +126,7 @@ class ProtoNet(nn.Module):
         total_predictions = 0
         correct_predictions = 0
 
+        random.seed(0)
         # model_protonet.eval()
         with torch.no_grad():
             for episode_index, (
@@ -140,6 +143,7 @@ class ProtoNet(nn.Module):
 
                 total_predictions += total
                 correct_predictions += correct
+                random.seed(episode_index + 1)
 
         print(
             f"Model tested on {len(test_loader)} tasks. Accuracy: {(100 * correct_predictions/total_predictions):.2f}%"

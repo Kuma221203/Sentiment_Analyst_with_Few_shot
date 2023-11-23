@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
+import random
 
 
 class Learner_protoMAML(nn.Module):
@@ -90,11 +91,13 @@ class ProtoMAML(nn.Module):
 
         return _backbone, output_weight, output_bias
 
-    def outer_loop(self, data_loader, mode = "train"):
+    def outer_loop(self, data_loader, mode = "train", episode_index = 0):
         accs = []
         losses = []
         self.backbone.zero_grad()
-
+        seed = episode_index * len(data_loader)
+        if mode == "test":
+            random.seed(seed)
         for iter, (
                 support_features,
                 support_labels,
@@ -110,12 +113,16 @@ class ProtoMAML(nn.Module):
 
                 for p_global, p_local in zip(self.backbone.parameters(), model.parameters()):
                     p_global.grad += p_local.grad
+            else:
+                random.seed(seed + iter + 1)
 
             accs.append(acc.mean().detach())
             losses.append(loss.detach())
 
+
         if mode == "train":
             self.meta_optim.step()
+            self.meta_scheduler.step()
             self.meta_optim.zero_grad()
 
         return float(sum(losses) / len(losses)), round(float(sum(accs) / len(accs)), 5)
@@ -134,13 +141,13 @@ class ProtoMAML(nn.Module):
 
         with tqdm(enumerate(range(num_task)), total=num_task) as tqdm_train:
             for episode_index, i in tqdm_train:
-                loss, acc = self.outer_loop(train_loader, mode="train")
+                loss, acc = self.outer_loop(train_loader, mode = "train", episode_index = episode_index)
                 all_loss.append(loss)
                 all_acc.append(acc)
                 if episode_index % log_update_frequency == 0:
                     tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
                                             acc=sliding_average(all_acc, log_update_frequency),
-                                            lr=self.meta_scheduler.get_last_lr())
+                                            lr=self.meta_scheduler.get_last_lr()[0])
 
     def test(self, test_loader):
         _, acc = self.outer_loop(test_loader, mode="test")
