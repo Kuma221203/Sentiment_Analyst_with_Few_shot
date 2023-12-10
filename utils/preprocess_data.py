@@ -30,10 +30,16 @@ def standardize_data(row):
     row = row.strip().lower()
     return row
 
-padded = []
-MAX_LEN_PAD = 150
+MAX_LEN_PAD = 160
 
 def standardize_data(row):
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                           "]+", flags=re.UNICODE)
+    row = emoji_pattern.sub(r'', row)
     # Xóa dấu chấm, phẩy, hỏi ở cuối câu
     row = re.sub(r"[\.,\?]+$-", "", row)
     # Xóa tất cả dấu chấm, phẩy, chấm phẩy, chấm thang, ... trong câu
@@ -66,6 +72,7 @@ def extract_features(data):
     steps = labels.shape[0] // 1000
 
     for i in range(steps):
+        print("extract from", i*1000, "to", (i+1)*1000)
         _padded = padded[i * 1000:(i + 1)*1000, :]
         _attention_mask = attention_mask[i * 1000:(i + 1)*1000, :]
         with torch.no_grad():
@@ -85,12 +92,4 @@ def extract_features(data):
     return torch.cat(features, 0), labels
 
 # Extract train features
-X_train, y_train = extract_features(data_train)
-np.save('data/train/X_train.npy', X_train)
-np.save('data/train/y_train.npy', y_train)
-
-# Extract test featrure
-X_test, y_test = extract_features(data_test)
-np.save('data/test/X_test.npy', X_test)
-np.save('data/test/y_test.npy', y_test)
-
+# X, y = extract_features(dataset)
