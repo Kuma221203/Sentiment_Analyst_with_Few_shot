@@ -15,6 +15,7 @@ class TaskSampler():
         n_shot: int,
         n_query: int,
         n_tasks: int,
+        RSML: bool,
     ):
 
         self.dataset = dataset
@@ -22,6 +23,7 @@ class TaskSampler():
         self.n_shot = n_shot
         self.n_query = n_query
         self.n_tasks = n_tasks
+        self.RSML = RSML
         self.items_per_label: Dict[int, List[int]] = {}
 
         for ind, (_, label) in enumerate(dataset):
@@ -33,18 +35,28 @@ class TaskSampler():
     def __len__(self) -> int:
         return self.n_tasks
 
+    # def __iter__(self) -> Iterator[List[int]]:
+    #     for _ in range(self.n_tasks):
+    #         yield torch.cat(
+    #             [
+    #                 torch.tensor(
+    #                     random.sample(
+    #                         self.items_per_label[label] , (random.randint(0, self.n_shot + self.n_query) if self.RSML else self.n_shot + self.n_query)
+    #                     )
+    #                 )
+    #                 for label in random.sample(range(len(self.items_per_label)), self.n_way)
+    #             ]
+    #         ).tolist()
+    
     def __iter__(self) -> Iterator[List[int]]:
         for _ in range(self.n_tasks):
-            yield torch.cat(
-                [
-                    torch.tensor(
-                        random.sample(
-                            self.items_per_label[label], self.n_shot + self.n_query
-                        )
-                    )
-                    for label in random.sample(range(3), self.n_way)
-                ]
-            ).tolist()
+            sample = []
+            max_ele = self.n_shot + self.n_query
+            for label in random.sample(range(len(self.items_per_label)), self.n_way):
+                num_ele = (random.randint(1, max_ele) if self.RSML else max_ele) # random shot meta learning
+                ele = random.sample(self.items_per_label[label], num_ele)
+                sample += [*ele, *random.choices(ele, k=max(0, max_ele - num_ele))] #random over sampling
+            yield sample
 
 
     def episodic_collate_fn(self, input_data: List[Tuple[Tensor, int]]) -> Tuple[Tensor, Tensor, Tensor, Tensor, List[int]]:
@@ -69,7 +81,7 @@ class TaskSampler():
             true_class_ids,
         )
 
-def get_dataloader(n_way, n_shot, n_query, n_tasks, path):
+def get_dataloader(n_way, n_shot, n_query, n_tasks, path, RSML = False):
 
     for f in os.listdir(path):
         if(f[0] == 'X'):
@@ -79,7 +91,7 @@ def get_dataloader(n_way, n_shot, n_query, n_tasks, path):
     dataset = tuple(zip(torch.tensor(X), y))
 
     sampler = TaskSampler(
-        dataset, n_way = n_way, n_shot=n_shot, n_query=n_query, n_tasks=n_tasks
+        dataset, n_way, n_shot, n_query, n_tasks, RSML,
     )
 
     loader = DataLoader(
@@ -89,6 +101,4 @@ def get_dataloader(n_way, n_shot, n_query, n_tasks, path):
         pin_memory=True,
         collate_fn=sampler.episodic_collate_fn,
     )
-
     return loader
-   

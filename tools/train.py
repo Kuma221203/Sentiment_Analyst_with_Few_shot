@@ -15,7 +15,7 @@ def get_parser():
     parser.add_argument("--n_way", default=2, help="number class", type=int)
     parser.add_argument("--n_shot", default=10, help="number support sample per class", type=int)
     parser.add_argument("--n_query", default=20, help="number query sample per class", type=int)
-    parser.add_argument("--tasks", default=1000, help="number train task", type=int)
+    parser.add_argument("--tasks", default=15000, help="number train task", type=int)
 
     parser.add_argument("--batch_size", default=16, help="batch size if using maml or protoMAML", type=int)
     parser.add_argument("--path_train", default='data/train/', help="path folder of train set", type=str)
