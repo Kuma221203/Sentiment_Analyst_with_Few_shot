@@ -9,6 +9,7 @@ import torch
 from utils.dataloader import get_dataloader
 from utils.getter import get_model
 import time
+import random
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -16,6 +17,7 @@ def get_parser():
     parser.add_argument("--n_shot", default=10, help="number support sample per class", type=int)
     parser.add_argument("--n_query", default=20, help="number query sample per class", type=int)
     parser.add_argument("--tasks", default=15000, help="number train task", type=int)
+    parser.add_argument("--RSML", default=False, help="random shot meta learning", type=bool)
 
     parser.add_argument("--batch_size", default=16, help="batch size if using maml or protoMAML", type=int)
     parser.add_argument("--path_train", default='data/train/', help="path folder of train set", type=str)
@@ -53,7 +55,8 @@ def train(args):
     # dataloader
     if(model_configs['name'] == 'ProtoNet'):
         args.batch_size = args.tasks
-    train_loader = get_dataloader(args.n_way, args.n_shot, args.n_query, args.batch_size, args.path_train)
+    random.seed(21522502)
+    train_loader = get_dataloader(args.n_way, args.n_shot, args.n_query, args.batch_size, args.path_train, args.RSML)
 
     if(args.using_pretrain and args.weights_path):
         model.load_state_dict(torch.load(args.weights_path))

@@ -4,7 +4,6 @@ from torch.optim.lr_scheduler import StepLR
 from typing import List
 from tqdm import tqdm
 import numpy as np
-import random
 
 class Learner_protoNet(nn.Module):
     def __init__(self):
@@ -126,8 +125,6 @@ class ProtoNet(nn.Module):
         total_predictions = 0
         correct_predictions = 0
 
-        random.seed(0)
-        # model_protonet.eval()
         with torch.no_grad():
             for episode_index, (
                 support_features,
@@ -143,7 +140,6 @@ class ProtoNet(nn.Module):
 
                 total_predictions += total
                 correct_predictions += correct
-                random.seed(episode_index + 1)
 
         print(
             f"Model tested on {len(test_loader)} tasks. Accuracy: {(100 * correct_predictions/total_predictions):.2f}%"

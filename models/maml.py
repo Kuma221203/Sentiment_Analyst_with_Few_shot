@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
-import random
 
 class Learner_MAML(nn.Module):
     def __init__(self, config):
@@ -178,7 +177,6 @@ class MAML(nn.Module):
 
         _backbone = deepcopy(self.backbone)
 
-        random.seed(0)
 
         for iter, (
                 support_features,
@@ -206,7 +204,6 @@ class MAML(nn.Module):
                 correct = torch.eq(pred_q, query_labels).sum().item()
                 corrects_sum += correct
             
-            random.seed(iter + 1)
 
         del _backbone
 

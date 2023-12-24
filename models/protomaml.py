@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
-import random
 
 
 class Learner_protoMAML(nn.Module):
@@ -96,8 +95,6 @@ class ProtoMAML(nn.Module):
         losses = []
         self.backbone.zero_grad()
         seed = episode_index * len(data_loader)
-        if mode == "test":
-            random.seed(seed)
         for iter, (
                 support_features,
                 support_labels,
@@ -113,8 +110,6 @@ class ProtoMAML(nn.Module):
 
                 for p_global, p_local in zip(self.backbone.parameters(), model.parameters()):
                     p_global.grad += p_local.grad
-            else:
-                random.seed(seed + iter + 1)
 
             accs.append(acc.mean().detach())
             losses.append(loss.detach())

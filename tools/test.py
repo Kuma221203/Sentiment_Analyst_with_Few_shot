@@ -9,6 +9,7 @@ import torch
 from utils.dataloader import get_dataloader
 from utils.getter import get_model
 import time
+import random
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -41,6 +42,7 @@ def test(args):
     #dataloader
     if(model_configs['name'] == 'ProtoNet'):
         args.batch_size = args.tasks
+    random.seed(21522502)
     test_loader = get_dataloader(args.n_way, args.n_shot, args.n_query, args.tasks, args.path_test)
 
     start = time.time()
