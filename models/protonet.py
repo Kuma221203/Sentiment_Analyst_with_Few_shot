@@ -77,7 +77,7 @@ class ProtoNet(nn.Module):
 
         return loss.item()
     
-    def train(self, train_loader, num_task):
+    def train(self, train_loader, epochs):
         def sliding_average(value_list: List[float], window: int) -> float:
             if len(value_list) == 0:
                 raise ValueError("Cannot perform sliding average on an empty list.")
@@ -86,7 +86,7 @@ class ProtoNet(nn.Module):
         all_loss = []
         log_update_frequency = 10
 
-        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
+        self.meta_scheduler = StepLR(self.meta_optim, epochs//4, 0.1)
 
         with tqdm(enumerate(train_loader), total=len(train_loader)) as tqdm_train:
             for episode_index, (

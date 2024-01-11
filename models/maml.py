@@ -85,10 +85,10 @@ class MAML(nn.Module):
         self.lr_inner = args['lr_inner']
         self.lr_meta = args['lr_meta']
         self.config = [('flatten', []), 
-                       ('linear', [512, 768]), 
-                       ('relu', [True]), 
-                       ('linear', [512, 512]), 
-                       ('relu', [True]), 
+                       ('linear', [512, 768]),
+                       ('relu', [True]),
+                       ('linear', [512, 512]),
+                       ('relu', [True]),
                        ('linear', [128, 512]), 
                        ('relu', [True]), 
                        ('linear', [2, 128])]
@@ -100,7 +100,6 @@ class MAML(nn.Module):
         self,
         data_loader,
     ):
-        task_num = len(data_loader)
         criterion = nn.CrossEntropyLoss()
         softmax = nn.Softmax(dim = 1)
         losses_sum = 0
@@ -135,6 +134,7 @@ class MAML(nn.Module):
                 correct = torch.eq(pred_q, query_labels).sum().item()
                 corrects_sum += correct
 
+        task_num = len(data_loader)
         loss_q = losses_sum/task_num
 
         self.meta_optim.zero_grad()
@@ -145,7 +145,7 @@ class MAML(nn.Module):
         accs = corrects_sum / (query_labels.size()[0] * task_num)
         return accs, loss_q.detach().numpy()
     
-    def train(self, train_loader, num_task):
+    def train(self, train_loader, epochs):
         def sliding_average(value_list: List[float], window: int) -> float:
             if len(value_list) == 0:
                 raise ValueError("Cannot perform sliding average on an empty list.")
@@ -155,9 +155,9 @@ class MAML(nn.Module):
         all_loss = []
         all_acc = []
 
-        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
+        self.meta_scheduler = StepLR(self.meta_optim, epochs//4, 0.1)
 
-        with tqdm(enumerate(range(num_task)), total=num_task) as tqdm_train:
+        with tqdm(enumerate(range(epochs)), total=epochs) as tqdm_train:
             for episode_index, i in tqdm_train:
                 acc, loss = self.forward(train_loader)
                 all_loss.append(loss)
@@ -170,7 +170,6 @@ class MAML(nn.Module):
         self,
         data_loader,
     ):
-        task_num = len(data_loader)
         criterion = nn.CrossEntropyLoss()
         softmax = nn.Softmax(dim = 1)
         corrects_sum = 0
@@ -204,9 +203,8 @@ class MAML(nn.Module):
                 correct = torch.eq(pred_q, query_labels).sum().item()
                 corrects_sum += correct
             
-
         del _backbone
-
+        task_num = len(data_loader)
         accs = corrects_sum / (query_labels.size()[0] * task_num)
         print(
             f"Model tested on {len(data_loader)} tasks. Accuracy: {(accs):.4f}%"
