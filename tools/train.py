@@ -9,7 +9,16 @@ import torch
 from utils.dataloader import get_dataloader
 from utils.getter import get_model
 import time
-import random
+
+def str2bool(value):
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif value.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -59,13 +68,13 @@ def get_parser():
         "--using_pretrain",
         default= False,
         help="using pretrain",
-        type=bool
+        type=str2bool
     )
     parser.add_argument(
         "--save_weights",
         default= False,
         help="save weights model",
-        type=bool
+        type=str2bool
     )
     return parser.parse_args()
 

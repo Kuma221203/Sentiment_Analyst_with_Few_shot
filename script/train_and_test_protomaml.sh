@@ -1,1 +1,4 @@
-python3 tools/train.py --n_way 2 --n_shot 10 --n_query 20 --tasks 1000 --batch_size 16 --path_train "data/train/" --config_path "configs/maml.yml" --weights_path "weights/maml.pt" --using_pretrain False --save_weights True
+#train
+python3 tools/train.py --n_way 3 --k_shot 5 --k_query 20 --epochs 10 --path_train "data/dic_1/train/" --config_path "configs/protomaml.yml" --weights_path "weights/protomaml.pt" --using_pretrain "False" --save_weights "True"
+#test
+python3 tools/test.py --n_way 3 --k_shot 5 --k_query 20 --path_test "data/dic_1/test/" --config_path "configs/protomaml.yml" --weights_path "weights/protomaml.pt"

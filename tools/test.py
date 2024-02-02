@@ -6,16 +6,14 @@ import argparse
 import yaml
 import torch
 
-from utils.dataloader import get_dataloader
 from utils.getter import get_model
 import time
-import random
 
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--n_way", 
-        default=2, 
+        default=3, 
         help="number class", 
         type=int
     )
@@ -59,7 +57,7 @@ def test(args):
 
     #training
     start = time.time()
-    model.test(args.n_way, args.k_shot, args.k_query, args.path_test)
+    y_true, y_predict = model.test(args.n_way, args.k_shot, args.k_query, args.path_test)
     end = time.time()
     print('Time test', end-start)
 

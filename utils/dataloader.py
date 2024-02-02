@@ -34,7 +34,7 @@ class TaskSampler():
         self.num_classes = len(self.items_per_label)
         self.batch_per_class = [0]*self.num_classes
         for c in range(self.num_classes):
-            self.batch_per_class[c] = len(self.items_per_label[c]) // (self.n_shot + self.n_query)
+            self.batch_per_class[c] = len(self.items_per_label[c]) // (self.k_shot + self.k_query)
 
     def __len__(self) -> int:
         return self.n_tasks
@@ -57,7 +57,7 @@ class TaskSampler():
                 class_choice = random.sample(remain_class, self.n_way)
 
             for c in class_choice:
-                _samples = random.sample(self.items_per_label[c], self.n_shot + self.n_query)
+                _samples = random.sample(self.items_per_label[c], self.k_shot + self.k_query)
                 samples += _samples
                 self.items_per_label[c] = list(set(self.items_per_label[c]).difference(_samples))
                 self.batch_per_class[c] -= 1
@@ -73,14 +73,14 @@ class TaskSampler():
         v_features = torch.cat([i[0] for i in input_data])
         true_class_ids = list({i[1] for i in input_data})
 
-        all_feartures = v_features.reshape((self.n_way, self.n_shot + self.n_query, -1))
-        all_labels = torch.tensor([true_class_ids.index(i[1]) for i in input_data]).reshape((self.n_way, self.n_shot + self.n_query))
+        all_feartures = v_features.reshape((self.n_way, self.k_shot + self.k_query, -1))
+        all_labels = torch.tensor([true_class_ids.index(i[1]) for i in input_data]).reshape((self.n_way, self.k_shot + self.k_query))
 
-        support_features = all_feartures[:, : self.n_shot].reshape((self.n_way * self.n_shot, -1))
-        query_features = all_feartures[:, self.n_shot :].reshape((self.n_way * self.n_query, -1))
+        support_features = all_feartures[:, : self.k_shot].reshape((self.n_way * self.k_shot, -1))
+        query_features = all_feartures[:, self.k_shot :].reshape((self.n_way * self.k_query, -1))
 
-        support_labels = all_labels[:, : self.n_shot].flatten()
-        query_labels = all_labels[:, self.n_shot :].flatten()
+        support_labels = all_labels[:, : self.k_shot].flatten()
+        query_labels = all_labels[:, self.k_shot :].flatten()
 
         return (
             support_features,
@@ -90,8 +90,9 @@ class TaskSampler():
             true_class_ids,
         )
 
-def get_dataloader(n_way, n_shot, n_query, mode_test, path):
-
+def get_dataloader(n_way, k_shot, k_query, mode_test, path):
+    if path[-1] != "/":
+        path += "/"
     for f in os.listdir(path):
         if(f[0] == 'X'):
           X = np.load(path+f)
@@ -100,7 +101,7 @@ def get_dataloader(n_way, n_shot, n_query, mode_test, path):
     dataset = tuple(zip(torch.tensor(X), y))
 
     sampler = TaskSampler(
-        dataset, n_way, n_shot, n_query, mode_test
+        dataset, n_way, k_shot, k_query, mode_test
     )
 
     loader = DataLoader(

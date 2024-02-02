@@ -36,11 +36,11 @@ class Backbone(nn.Module):
 class MAML(nn.Module):
     def __init__(self, args):
         super(MAML, self).__init__()
-        self.backbone = Backbone()
+        self.n_way = args['n_way']
+        self.backbone = Backbone(self.n_way)
         self.lr_meta = args['lr_meta']
         self.lr_inner = args['lr_inner']
         self.num_inner_steps = args['num_inner_steps']
-        self.n_way = args['n_way']
         self.meta_optim = optim.Adam(self.backbone.parameters(), lr=self.lr_meta)
         self.meta_scheduler = None
 
@@ -133,8 +133,6 @@ class MAML(nn.Module):
 
     def test(self, n_way, k_shot, k_query, path_to_data):
         assert n_way == self.n_way
-        self.lr_inner = 0.005
-        self.num_inner_steps = 20
         test_loader = get_dataloader(n_way, k_shot, k_query, True, path_to_data)
         _, _, y_true, y_predict = self.outer_loop(test_loader, mode="test")
         print("\n", classification_report(y_true, y_predict, target_names=["negative", "neutral", "positive"]))
