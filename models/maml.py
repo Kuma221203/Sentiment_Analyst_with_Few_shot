@@ -6,105 +6,71 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
+from utils.dataloader import get_dataloader
+from sklearn.metrics import classification_report
 
-class Learner_MAML(nn.Module):
-    def __init__(self, config):
-        if config:
-            super(Learner_MAML, self).__init__()
-            self.vars = nn.ParameterList()
-            self.config = config
-        else:
-            raise NotImplementedError
+class Backbone(nn.Module):
+    def __init__(self, n_way):
+        super().__init__()
+        self.flatten = nn.Flatten()
 
-        for i, (name, param) in enumerate(self.config):
-            if name == "linear":
-                w = nn.Parameter(torch.ones(*param))
-                torch.nn.init.kaiming_normal_(w)
-                self.vars.append(w)
-                self.vars.append(nn.Parameter(torch.zeros(param[0])))
-            elif name in ["relu", "sigmoid", 'flatten']:
-                continue
-            else:
-                raise NotImplementedError
+        self.linear_relu_stack = nn.Sequential(
+            nn.Linear(768, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
+            nn.Linear(128, 32),
+            nn.Linear(32, n_way),
+        )
 
-    def show_arch(self):
-        info = ""
-
-        for name, param in self.config:
-            if name == "linear":
-                tmp = 'linear:(in:%d, out:%d)'%(param[1], param[0])
-                info += tmp + '\n'
-            elif name in ['relu', 'sigmoid', 'flatten']:
-                tmp = name + ":" + str(tuple(param))
-                info += tmp + '\n'
-            else:
-                raise NotImplementedError
-
-        return info
-
-    def forward(self, x, vars = None):
-        if vars is None:
-            vars = self.vars
-
-        idx = 0
-
-        for name, param in self.config:
-            if name == "linear":
-                w, b = vars[idx], vars[idx + 1]
-                x = F.linear(x, w, b)
-                idx += 2
-            elif name == 'flatten':
-                x = x.view(x.size(0), -1)
-            elif name == 'relu':
-                x = F.relu(x, inplace=param[0])
-            else:
-                raise NotImplementedError
-
-        assert idx == len(vars)
-        return x
-
-    def parameters(self):
-        return self.vars
-
-    def zero_grad(self, vars=None):
-        with torch.no_grad():
-            if vars is None:
-                for p in self.vars:
-                    if p.grad is not None:
-                        p.grad.zero_()
-            else:
-                for p in vars:
-                    if p.grad is not None:
-                        p.grad.zero_()
+    def forward(self, x):
+        x = self.flatten(x)
+        logits = self.linear_relu_stack(x)
+        return logits
 
 class MAML(nn.Module):
     def __init__(self, args):
         super(MAML, self).__init__()
-
-        self.num_inner_steps = args['num_inner_steps']
-        self.lr_inner = args['lr_inner']
+        self.backbone = Backbone()
         self.lr_meta = args['lr_meta']
-        self.config = [('flatten', []), 
-                       ('linear', [512, 768]),
-                       ('relu', [True]),
-                       ('linear', [512, 512]),
-                       ('relu', [True]),
-                       ('linear', [128, 512]), 
-                       ('relu', [True]), 
-                       ('linear', [2, 128])]
-        self.backbone = Learner_MAML(self.config)
+        self.lr_inner = args['lr_inner']
+        self.num_inner_steps = args['num_inner_steps']
+        self.n_way = args['n_way']
         self.meta_optim = optim.Adam(self.backbone.parameters(), lr=self.lr_meta)
         self.meta_scheduler = None
-        
-    def forward(
-        self,
-        data_loader,
-    ):
-        criterion = nn.CrossEntropyLoss()
-        softmax = nn.Softmax(dim = 1)
-        losses_sum = 0
-        corrects_sum = 0
 
+    def run_model(self, model, support_features, support_labels):
+        preds = model.forward(support_features)
+        loss = F.cross_entropy(preds, support_labels)
+        acc = (preds.argmax(dim=1) == support_labels).float()
+        return loss, preds, acc
+
+    def adapt_few_shot(self, support_features, support_labels):
+        _backbone = deepcopy(self.backbone)
+        inner_optim = torch.optim.SGD(_backbone.parameters(), lr=self.lr_inner)
+        self.inner_scheduler = StepLR(inner_optim, self.num_inner_steps//4, 0.8)
+        inner_optim.zero_grad()
+
+        for _ in range(self.num_inner_steps):
+            loss, _, _ = self.run_model(_backbone, support_features, support_labels)
+            loss.backward()
+            inner_optim.step()
+            inner_optim.zero_grad()
+
+        return _backbone
+
+    def outer_loop(self, data_loader, mode = "train"):
+        accs = []
+        losses = []
+        y_true = []
+        y_predict = []
+        softmax = nn.Softmax(dim = 1)
+        self.backbone.zero_grad()
         for iter, (
                 support_features,
                 support_labels,
@@ -112,101 +78,64 @@ class MAML(nn.Module):
                 query_labels,
                 class_ids,
         ) in enumerate(data_loader):
+            model= self.adapt_few_shot(support_features, support_labels)
+            loss, z_query, acc = self.run_model(model, query_features, query_labels)
 
-            z_support = self.backbone.forward(support_features)
-            loss = criterion(z_support, support_labels)
-            grad = torch.autograd.grad(loss, self.backbone.parameters(), allow_unused=True)
-            # theta_pi = theta_pi - train_lr * grad
-            fast_weights = list(map(lambda p: p[1] - self.lr_inner * p[0], zip(grad, self.backbone.parameters())))
-
-            for step in range(1, self.num_inner_steps):
-                z_support = self.backbone.forward(support_features, fast_weights)
-                loss = criterion(z_support, support_labels)
-                grad = torch.autograd.grad(loss, fast_weights, allow_unused=True)
-                fast_weights = list(map(lambda p: p[1] - self.lr_inner * p[0], zip(grad, fast_weights)))
-
-            z_query = self.backbone(query_features, fast_weights)
-            loss_q = F.cross_entropy(z_query, query_labels)
-            losses_sum += loss_q
+            if mode == "train":
+                loss.backward()
+                for p_global, p_local in zip(self.backbone.parameters(), model.parameters()):
+                    p_global.grad = p_local.grad if p_global.grad is None else (p_global.grad + p_local.grad)
 
             with torch.no_grad():
-                pred_q = softmax(z_query).argmax(dim=1)
-                correct = torch.eq(pred_q, query_labels).sum().item()
-                corrects_sum += correct
+                z_predict = softmax(z_query).argmax(dim=1)
+                _query_labels = query_labels.clone()
+                _z_predict = z_predict.clone()
+                if(len(class_ids) == 2):
+                    query_labels[_query_labels == 0] = min(class_ids)
+                    query_labels[_query_labels == 1] = max(class_ids)
+                    z_predict[_z_predict == 0] = min(class_ids)
+                    z_predict[_z_predict == 1] = max(class_ids)
+                y_true += query_labels.int().tolist()
+                y_predict += z_predict.int().tolist()
 
-        task_num = len(data_loader)
-        loss_q = losses_sum/task_num
+            accs.append(acc.mean().detach())
+            losses.append(loss.detach())
 
-        self.meta_optim.zero_grad()
-        loss_q.backward()
-        self.meta_optim.step()
-        self.meta_scheduler.step()
 
-        accs = corrects_sum / (query_labels.size()[0] * task_num)
-        return accs, loss_q.detach().numpy()
-    
-    def train(self, train_loader, epochs):
+        if mode == "train":
+            self.meta_optim.step()
+            self.meta_scheduler.step()
+            self.meta_optim.zero_grad()
+        return float(sum(losses) / len(losses)), round(float(sum(accs) / len(accs)), 5), y_true, y_predict
+
+    def train(self, epochs, n_way, k_shot, k_query, path_to_data):
+        assert n_way == self.n_way
         def sliding_average(value_list: List[float], window: int) -> float:
             if len(value_list) == 0:
                 raise ValueError("Cannot perform sliding average on an empty list.")
             return np.asarray(value_list[-window:]).mean()
 
-        log_update_frequency = 5
+        log_update_frequency = 3
         all_loss = []
         all_acc = []
 
-        self.meta_scheduler = StepLR(self.meta_optim, epochs//4, 0.1)
-
+        self.meta_scheduler = StepLR(self.meta_optim, epochs//2, 0.5)
         with tqdm(enumerate(range(epochs)), total=epochs) as tqdm_train:
             for episode_index, i in tqdm_train:
-                acc, loss = self.forward(train_loader)
+                train_loader = get_dataloader(n_way, k_shot, k_query, False, path_to_data)
+                loss, acc, _, _ = self.outer_loop(train_loader, mode = "train")
                 all_loss.append(loss)
                 all_acc.append(acc)
                 if episode_index % log_update_frequency == 0:
-                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
-                                        acc=sliding_average(all_acc, log_update_frequency), 
-                                        lr=self.meta_scheduler.get_last_lr()[0])
-    def test(
-        self,
-        data_loader,
-    ):
-        criterion = nn.CrossEntropyLoss()
-        softmax = nn.Softmax(dim = 1)
-        corrects_sum = 0
+                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
+                                            acc=sliding_average(all_acc, log_update_frequency),
+                                            lr=self.meta_scheduler.get_last_lr()[0])
 
-        _backbone = deepcopy(self.backbone)
-
-
-        for iter, (
-                support_features,
-                support_labels,
-                query_features,
-                query_labels,
-                class_ids,
-        ) in enumerate(data_loader):
-
-            z_support = _backbone.forward(support_features)
-            loss = criterion(z_support, support_labels)
-            grad = torch.autograd.grad(loss, _backbone.parameters(), allow_unused=True)
-            fast_weights = list(map(lambda p: p[1] - self.lr_inner * p[0], zip(grad, _backbone.parameters())))
-
-            for step in range(1, self.num_inner_steps):
-                z_support = _backbone.forward(support_features, fast_weights)
-                loss = criterion(z_support, support_labels)
-                grad = torch.autograd.grad(loss, fast_weights, allow_unused=True)
-                fast_weights = list(map(lambda p: p[1] - self.lr_inner * p[0], zip(grad, fast_weights)))
-
-            z_query = _backbone(query_features, fast_weights)
-
-            with torch.no_grad():
-                pred_q = softmax(z_query).argmax(dim=1)
-                correct = torch.eq(pred_q, query_labels).sum().item()
-                corrects_sum += correct
-            
-        del _backbone
-        task_num = len(data_loader)
-        accs = corrects_sum / (query_labels.size()[0] * task_num)
-        print(
-            f"Model tested on {len(data_loader)} tasks. Accuracy: {(accs):.4f}%"
-        )
-        return accs
+    def test(self, n_way, k_shot, k_query, path_to_data):
+        assert n_way == self.n_way
+        self.lr_inner = 0.005
+        self.num_inner_steps = 20
+        test_loader = get_dataloader(n_way, k_shot, k_query, True, path_to_data)
+        _, _, y_true, y_predict = self.outer_loop(test_loader, mode="test")
+        print("\n", classification_report(y_true, y_predict, target_names=["negative", "neutral", "positive"]))
+        return y_true, y_predict

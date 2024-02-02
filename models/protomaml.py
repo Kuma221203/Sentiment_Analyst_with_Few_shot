@@ -6,9 +6,10 @@ from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 import numpy as np
+from utils.dataloader import get_dataloader
+from sklearn.metrics import classification_report
 
-
-class Learner_protoMAML(nn.Module):
+class Backbone(nn.Module):
     def __init__(self):
         super().__init__()
         self.flatten = nn.Flatten()
@@ -27,7 +28,6 @@ class Learner_protoMAML(nn.Module):
         )
 
     def forward(self, x):
-
         x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
@@ -35,7 +35,7 @@ class Learner_protoMAML(nn.Module):
 class ProtoMAML(nn.Module):
     def __init__(self, args):
         super(ProtoMAML, self).__init__()
-        self.backbone = Learner_protoMAML()
+        self.backbone = Backbone()
         self.lr_meta = args['lr_meta']
         self.lr_output = args['lr_output']
         self.lr_inner = args['lr_inner']
@@ -93,8 +93,10 @@ class ProtoMAML(nn.Module):
     def outer_loop(self, data_loader, mode = "train", episode_index = 0):
         accs = []
         losses = []
+        y_true = []
+        y_predict = []
+        softmax = nn.Softmax(dim = 1)
         self.backbone.zero_grad()
-        seed = episode_index * len(data_loader)
         for iter, (
                 support_features,
                 support_labels,
@@ -103,13 +105,24 @@ class ProtoMAML(nn.Module):
                 class_ids,
         ) in enumerate(data_loader):
             model, output_weight, output_bias = self.adapt_few_shot(support_features, support_labels)
-            loss, preds, acc = self.run_model(model, output_weight, output_bias, query_features, query_labels)
+            loss, z_query, acc = self.run_model(model, output_weight, output_bias, query_features, query_labels)
 
             if mode == "train":
                 loss.backward()
-
                 for p_global, p_local in zip(self.backbone.parameters(), model.parameters()):
                     p_global.grad += p_local.grad
+
+            with torch.no_grad():
+                z_predict = softmax(z_query).argmax(dim=1)
+                _query_labels = query_labels.clone()
+                _z_predict = z_predict.clone()
+                if(len(class_ids) == 2):
+                    query_labels[_query_labels == 0] = min(class_ids)
+                    query_labels[_query_labels == 1] = max(class_ids)
+                    z_predict[_z_predict == 0] = min(class_ids)
+                    z_predict[_z_predict == 1] = max(class_ids)
+                y_true += query_labels.int().tolist()
+                y_predict += z_predict.int().tolist()
 
             accs.append(acc.mean().detach())
             losses.append(loss.detach())
@@ -120,30 +133,32 @@ class ProtoMAML(nn.Module):
             self.meta_scheduler.step()
             self.meta_optim.zero_grad()
 
-        return float(sum(losses) / len(losses)), round(float(sum(accs) / len(accs)), 5)
+        return float(sum(losses) / len(losses)), round(float(sum(accs) / len(accs)), 5), y_true, y_predict
 
-    def train(self, train_loader, num_task):
+    def train(self, epochs, n_way, k_shot, k_query, path_to_data):
         def sliding_average(value_list: List[float], window: int) -> float:
             if len(value_list) == 0:
                 raise ValueError("Cannot perform sliding average on an empty list.")
             return np.asarray(value_list[-window:]).mean()
 
-        log_update_frequency = 5
+        log_update_frequency = 2
         all_loss = []
         all_acc = []
 
-        self.meta_scheduler = StepLR(self.meta_optim, num_task//4, 0.1)
-
-        with tqdm(enumerate(range(num_task)), total=num_task) as tqdm_train:
+        self.meta_scheduler = StepLR(self.meta_optim, epochs//2, 0.1)
+        with tqdm(enumerate(range(epochs)), total=epochs) as tqdm_train:
             for episode_index, i in tqdm_train:
-                loss, acc = self.outer_loop(train_loader, mode = "train", episode_index = episode_index)
+                train_loader = get_dataloader(n_way, k_shot, k_query, False, path_to_data)
+                loss, acc, _, _ = self.outer_loop(train_loader, mode = "train", episode_index = episode_index)
                 all_loss.append(loss)
                 all_acc.append(acc)
                 if episode_index % log_update_frequency == 0:
-                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency), 
+                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
                                             acc=sliding_average(all_acc, log_update_frequency),
                                             lr=self.meta_scheduler.get_last_lr()[0])
 
-    def test(self, test_loader):
-        _, acc = self.outer_loop(test_loader, mode="test")
-        print(f"Model tested on {len(test_loader)} tasks. Accuracy: {(acc):.4f}%")
+    def test(self, n_way, k_shot, k_query, path_to_data):
+        test_loader = get_dataloader(n_way, k_shot, k_query, True, path_to_data)
+        _, _, y_true, y_predict = self.outer_loop(test_loader, mode="test")
+        print("\n", classification_report(y_true, y_predict, target_names=["negative", "neutral", "positive"]))
+        return y_true, y_predict

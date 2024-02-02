@@ -4,8 +4,10 @@ from torch.optim.lr_scheduler import StepLR
 from typing import List
 from tqdm import tqdm
 import numpy as np
+from utils.dataloader import get_dataloader
+from sklearn.metrics import classification_report
 
-class Learner_protoNet(nn.Module):
+class Backbone(nn.Module):
     def __init__(self):
         super().__init__()
         self.flatten = nn.Flatten()
@@ -30,9 +32,10 @@ class Learner_protoNet(nn.Module):
 class ProtoNet(nn.Module):
     def __init__(self, args):
         super(ProtoNet, self).__init__()
-        self.backbone = Learner_protoNet()
+        self.backbone = Backbone()
+        self.lr_meta = args['lr_meta']
         self.criterion = nn.CrossEntropyLoss()
-        self.meta_optim = optim.Adam(self.backbone.parameters(), lr=args['lr_meta'])
+        self.meta_optim = optim.Adam(self.backbone.parameters(), lr = self.lr_meta)
         self.meta_scheduler = None
 
     def forward(
@@ -53,7 +56,6 @@ class ProtoNet(nn.Module):
                 for label in range(n_way)
             ]
         )
-
         scores = - torch.cdist(z_query, z_proto)
         return scores
 
@@ -76,55 +78,39 @@ class ProtoNet(nn.Module):
         self.meta_scheduler.step()
 
         return loss.item()
-    
-    def train(self, train_loader, epochs):
+
+    def train(self, epochs, n_way, k_shot, k_query, path_to_data):
         def sliding_average(value_list: List[float], window: int) -> float:
             if len(value_list) == 0:
                 raise ValueError("Cannot perform sliding average on an empty list.")
             return np.asarray(value_list[-window:]).mean()
 
         all_loss = []
-        log_update_frequency = 10
+        log_update_frequency = 3
 
-        self.meta_scheduler = StepLR(self.meta_optim, epochs//4, 0.1)
+        self.meta_scheduler = StepLR(self.meta_optim, epochs*10, 0.1)
 
-        with tqdm(enumerate(train_loader), total=len(train_loader)) as tqdm_train:
-            for episode_index, (
-                support_images,
-                support_labels,
-                query_images,
-                query_labels,
-                _,
-            ) in tqdm_train:
-                loss_value = self.fit(support_images, support_labels, query_images, query_labels)
-                all_loss.append(loss_value)
-                if episode_index % log_update_frequency == 0:
-                    tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
-                                           lr=self.meta_scheduler.get_last_lr()[0])
-    
-    def test(self, test_loader):
-        def evaluate_on_one_task(
-            support_features: torch.Tensor,
-            support_labels: torch.Tensor,
-            query_features: torch.Tensor,
-            query_labels: torch.Tensor,
-        ) -> [int, int]:
-            """
-            Returns the number of correct predictions of query labels, and the total number of predictions.
-            """
-            return (
-                torch.max(
-                    self.forward(support_features, support_labels, query_features)
-                    .detach()
-                    .data,
-                    1,
-                )[1]
-                == query_labels
-            ).sum().item(), len(query_labels)
+        with tqdm(enumerate(range(epochs)), total=epochs) as tqdm_train:
+            for episode_index, i in tqdm_train:
+                train_loader = get_dataloader(n_way, k_shot, k_query, False, path_to_data)
+                for (
+                    support_images,
+                    support_labels,
+                    query_images,
+                    query_labels,
+                    true_class,
+                ) in train_loader:
+                    loss_value = self.fit(support_images, support_labels, query_images, query_labels)
+                    all_loss.append(loss_value)
+                    if episode_index % log_update_frequency == 0:
+                        tqdm_train.set_postfix(loss=sliding_average(all_loss, log_update_frequency),
+                                            lr=self.meta_scheduler.get_last_lr()[0])
 
-        total_predictions = 0
-        correct_predictions = 0
 
+    def test(self, n_way, k_shot, k_query, path_to_data):
+        test_loader = get_dataloader(n_way, k_shot, k_query, True, path_to_data)
+        y_true = []
+        y_predict = []
         with torch.no_grad():
             for episode_index, (
                 support_features,
@@ -132,15 +118,17 @@ class ProtoNet(nn.Module):
                 query_features,
                 query_labels,
                 class_ids,
-            ) in tqdm(enumerate(test_loader), total=len(test_loader)):
+            ) in tqdm(enumerate(test_loader)):
+                z_predict = torch.max(self.forward(support_features, support_labels, query_features).detach().data, 1,)[1]
 
-                correct, total = evaluate_on_one_task(
-                    support_features, support_labels, query_features, query_labels
-                )
-
-                total_predictions += total
-                correct_predictions += correct
-
-        print(
-            f"Model tested on {len(test_loader)} tasks. Accuracy: {(100 * correct_predictions/total_predictions):.2f}%"
-        )
+                _query_labels = query_labels.clone()
+                _z_predict = z_predict.clone()
+                if(len(class_ids) == 2):
+                    query_labels[_query_labels == 0] = min(class_ids)
+                    query_labels[_query_labels == 1] = max(class_ids)
+                    z_predict[_z_predict == 0] = min(class_ids)
+                    z_predict[_z_predict == 1] = max(class_ids)
+                y_true += query_labels.int().tolist()
+                y_predict += z_predict.int().tolist()
+        print("\n", classification_report(y_true, y_predict, target_names=["negative", "neutral", "positive"]))
+        return y_true, y_predict

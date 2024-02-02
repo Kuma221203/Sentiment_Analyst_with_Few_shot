@@ -13,12 +13,30 @@ import random
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_way", default=2, help="number class", type=int)
-    parser.add_argument("--n_shot", default=5, help="number support sample per class", type=int)
-    parser.add_argument("--n_query", default=20, help="number query sample per class", type=int)
-    parser.add_argument("--epochs", default=15000, help="number test epochs", type=int)
-    parser.add_argument("--batch_size", default=1, help="batch size (if using maml or protoMAML)", type=int)
-    parser.add_argument("--path_test", default='data/test/', help="path folder of test set", type = str)
+    parser.add_argument(
+        "--n_way", 
+        default=2, 
+        help="number class", 
+        type=int
+    )
+    parser.add_argument(
+        "--k_shot", 
+        default=5, 
+        help="number support sample per class", 
+        type=int
+    )
+    parser.add_argument(
+        "--k_query", 
+        default=20, 
+        help="number query sample per class", 
+        type=int
+    )
+    parser.add_argument(
+        "--path_test", 
+        default='data/test/', 
+        help="path folder of test set", 
+        type = str
+    )
     parser.add_argument(
         "--config_path", 
         default="configs/protonet.yml", 
@@ -39,16 +57,10 @@ def test(args):
     model = get_model(model_configs)
     model.load_state_dict(torch.load(args.weights_path))
 
-    #dataloader
-    if(model_configs['name'] == 'ProtoNet'):
-        args.batch_size = args.tasks
-    random.seed(21522502)
-    test_loader = get_dataloader(args.n_way, args.n_shot, args.n_query, args.tasks, args.path_test)
-
+    #training
     start = time.time()
-    model.test(test_loader)
+    model.test(args.n_way, args.k_shot, args.k_query, args.path_test)
     end = time.time()
-
     print('Time test', end-start)
 
 if __name__ == "__main__":
